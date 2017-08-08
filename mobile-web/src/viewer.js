@@ -15,8 +15,8 @@
  */
 
 import {constructViewerCacheUrl} from './amp-url-creator';
+import {paramsToString} from './amp-url-creator';
 import {ViewerMessaging} from './viewer-messaging';
-import {History} from './history';
 import {log} from '../utils/log';
 import {parseUrl} from '../utils/url';
 
@@ -49,9 +49,6 @@ class Viewer {
 
     /** @private {?Element} */
     this.iframe_ = null;
-
-    /** @private {!History} */
-    this.history_ = new History(this.handleChangeHistoryState_.bind(this));
   }
 
   /**
@@ -81,6 +78,7 @@ class Viewer {
    */
   attach() {
     this.iframe_ = document.createElement('iframe');
+    this.iframe_.setAttribute('sandbox', 'allow-scripts');
     // TODO (chenshay): iframe_.setAttribute('scrolling', 'no')
     // to enable the scrolling workarounds for iOS.
 
@@ -88,16 +86,31 @@ class Viewer {
       this.viewerMessaging_ = new ViewerMessaging(
         window,
         this.iframe_,
-        parseUrl(ampDocCachedUrl).origin,
+        "null" /* frameOrigin */,
         this.messageHandler_.bind(this));
 
-      this.viewerMessaging_.start().then(()=>{
+      this.viewerMessaging_.start(true /* opt_isHandshakePoll */).then(()=>{
         log('this.viewerMessaging_.start() Promise resolved !!!');
       });
 
-      this.iframe_.src = ampDocCachedUrl;
+      this.iframe_.name = `__AMP__${paramsToString(this.createInitParams_())}`;
+      this.iframe_.srcdoc = `
+<!doctype html>
+<html amp>
+ <head>
+   <meta charset="utf-8">
+   <link rel="canonical" href="hello-world.html">
+   <meta name="viewport" content="width=device-width,minimum-scale=1,initial-scale=1">
+   <style amp-boilerplate>body{-webkit-animation:-amp-start 8s steps(1,end) 0s 1 normal both;-moz-animation:-amp-start 8s steps(1,end) 0s 1 normal both;-ms-animation:-amp-start 8s steps(1,end) 0s 1 normal both;animation:-amp-start 8s steps(1,end) 0s 1 normal both}@-webkit-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-moz-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-ms-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@-o-keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}@keyframes -amp-start{from{visibility:hidden}to{visibility:visible}}</style><noscript><style amp-boilerplate>body{-webkit-animation:none;-moz-animation:none;-ms-animation:none;animation:none}</style></noscript>
+   <script async src="https://cdn.ampproject.org/v0/amp-viewer-integration-0.1.js"></script>
+   <script async src="https://cdn.ampproject.org/v0.js"></script>
+ </head>
+ <body>Hello World!</body>
+</html>
+      `;
+      //this.iframe_.removeAttribute('srcdoc');
+      //this.iframe_.src = ampDocCachedUrl;
       this.hostElement_.appendChild(this.iframe_);
-      this.history_.pushState(this.ampDocUrl_);
     });
   }
 
@@ -124,7 +137,7 @@ class Viewer {
 
     const initParams = {
       'origin': parsedViewerUrl.origin,
-      'cap': 'history',
+      'cap': 'handshakepoll',
     };
 
     if (this.referrer_) initParams['referrer'] = this.referrer_;
@@ -146,24 +159,9 @@ class Viewer {
     this.iframe_ = null;
     this.viewerMessaging_ = null;
   }
-  
-  /**
-   * @param {boolean} isLastBack true if back button was hit and viewer should hide.
-   * @param {boolean} isAMP true if going to AMP document.
-   * @private
-    */
-  handleChangeHistoryState_(isLastBack, isAMP) {
-    if (isLastBack) {
-      if (this.hideViewer_) this.hideViewer_();
-      return;
-    }
-    if (isAMP && this.showViewer_ && this.isViewerHidden_ && this.isViewerHidden_()) {
-      this.showViewer_();
-    }
-  }
 
   /**
-   * Place holder message handler. 
+   * Place holder message handler.
    * @param {string} name
    * @param {*} data
    * @param {boolean} rsvp
@@ -174,11 +172,7 @@ class Viewer {
     log('messageHandler: ', name, data, rsvp);
     switch(name) {
       case 'pushHistory':
-        this.history_.pushState(this.ampDocUrl_, data);
-        return Promise.resolve();
       case 'popHistory':
-        this.history_.goBack();
-        return Promise.resolve();
       case 'cancelFullOverlay':
       case 'documentLoaded':
       case 'documentHeight':

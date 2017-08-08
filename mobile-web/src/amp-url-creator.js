@@ -82,7 +82,7 @@ export function constructViewerCacheUrl(url, initParams,
         search +
         'amp_js_v=' + viewerJsVersion +
         '#' +
-        paramsToString_(initParams)
+        paramsToString(initParams)
       );
     });
   });
@@ -255,7 +255,7 @@ function hex_(buffer) {
  * @return {string}
  * @private
  */
-function paramsToString_(params) {
+export function paramsToString(params) {
   let str = '';
   for (let key in params) {
     let value = params[key];
