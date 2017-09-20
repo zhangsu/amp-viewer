@@ -16,7 +16,7 @@
 
 import {History} from './history';
 import {ViewerMessaging} from './viewer-messaging';
-import {constructViewerCacheUrl} from './amp-url-creator';
+import {paramsToString} from './amp-url-creator';
 import {log} from '../utils/log';
 import {parseUrl} from '../utils/url';
 
@@ -105,13 +105,8 @@ class Viewer {
    * @return {!Promise<string>}
    */
   buildIframeSrc_() {
-    return new Promise(resolve => {
-      constructViewerCacheUrl(this.ampDocUrl_, this.createInitParams_()).then(
-        viewerCacheUrl => {
-          resolve(viewerCacheUrl);
-        }
-      );
-    });
+    return Promise.resolve(
+      `${this.ampDocUrl_}#${paramsToString(this.createInitParams_())}`);
   }
 
   /**
@@ -124,7 +119,7 @@ class Viewer {
 
     const initParams = {
       'origin': parsedViewerUrl.origin,
-      'cap': 'history',
+      'cap': 'xhrInterceptor',
     };
 
     if (this.referrer_) initParams['referrer'] = this.referrer_;
@@ -179,6 +174,8 @@ class Viewer {
       case 'popHistory':
         this.history_.goBack();
         return Promise.resolve();
+      case 'xhr':
+        return this.handleXhr_(data);
       case 'cancelFullOverlay':
       case 'documentLoaded':
       case 'documentHeight':
@@ -189,6 +186,54 @@ class Viewer {
       default:
         return Promise.reject(name + ' Message is not supported!');
     }
+  }
+
+  handleXhr_(payload) {
+    const originalRequest = payload.originalRequest;
+    const init = originalRequest.init;
+    const newInit = Object.assign({}, init);
+    if (init.headers &&
+        init.headers['Content-Type'] &&
+        init.headers['Content-Type'].startsWith('multipart/form-data')) {
+      const formData = new FormData();
+      for (let [fieldName, fieldValues] of Object.entries(init.body)) {
+        formData.append(fieldName, fieldValues);
+      }
+      newInit.body = formData;
+    }
+    return fetch(originalRequest.input, newInit)
+        .then(response => this.serializeResponse_(response))
+        .then(serializedResponse => {
+          serializedResponse.init.headers['amp-access-control-allow-source-origin'] =
+              parseUrl(this.iframe_.src).origin;
+          return serializedResponse;
+        });
+  }
+
+  serializeResponse_(response) {
+    return response.text().then(
+        text => ({
+          body: text,
+          init: {
+            headers: [...response.headers.keys()].reduce(
+                (headers, headerName) => {
+                  // The value returned by Headers#get() is automatically
+                  // converted to a comma-separated string list if the header
+                  // has multiple values, which is the required format when
+                  // passing the header as an object literal to constructor of
+                  // Response. If the code here is iterating directly on the
+                  // header (or Headers#entries()), then multiple header
+                  // values corresponding to the same header will be returned in
+                  // separate entries, and joining them with comma will have to
+                  // be handled manually.
+                  headers[headerName] = response.headers.get(headerName);
+                  return headers;
+                },
+                {}),
+            status: response.status,
+            statusText: response.statusText,
+          },
+        }));
   }
 }
 window.Viewer = Viewer;
